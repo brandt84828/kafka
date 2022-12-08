@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-conf-configmap
+  namespace: fluentd-test
+data:
+  fluentd.conf: |
+    <source>
+      @type tail
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd/fluentd-containers.log.pos
+      tag *.*
+      read_from_head true
+      <parse>
+        @type cri
+        merge_cri_fields false
+      </parse>
+    </source>
+    <filter *.**>
+      @type record_transformer
+      <record>
+        filename ${tag_suffix[3]}
+      </record>
+    </filter>
+    <match *.**>
+      @type kafka2
+      brokers x.x.x.x:9092
+      <buffer topic>
+        @type file
+        path /var/log/td-agent/buffer/td
+        flush_interval 3s
+      </buffer>
+      <format>
+        @type json
+      </format>
+    topic_key topic
+    default_topic test
+    required_acks -1
+    </match>
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fluentd
+  namespace: fluentd-test
+  labels:
+    k8s-app: fluentd-logging
+    version: v1
+spec:
+  containers:
+  - name: fluentd
+    image: docker.io/fluent/fluentd-kubernetes-daemonset:v1.15.3-debian-kafka2-amd64-1.0
+    imagePullPolicy: IfNotPresent
+    env:
+    - name: FLUENTD_CONF
+      value: "fluentd.conf"
+    resources:
+      limits:
+        memory: 200Mi
+      requests:
+        cpu: 100m
+        memory: 200Mi
+    volumeMounts:
+    - name: varlog
+      mountPath: /var/log/containers
+    - name: dockercontainerlogdirectory
+      mountPath: /var/log/pods
+      readOnly: true
+    - name: fluentd-conf
+      mountPath: /fluentd/etc
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - operator: "Exists"
+  volumes:
+  - name: varlog
+    hostPath:
+      path: /var/log/containers
+  - name: dockercontainerlogdirectory
+    hostPath:
+      path: /var/log/pods
+  - name: fluentd-conf
+    configMap:
+      name: fluentd-conf-configmap
