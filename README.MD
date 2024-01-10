@@ -477,6 +477,13 @@ Kafka模式不再依賴Zookeeper集群，而是用三台controller節點代替zo
 ```bash
 bin/kafka-server-start.sh -daemon config/kraft/server.properties
 ```
+#### Kraft Deploying Considerations
+* Kafka server's process.role should be set to either broker or controller but not both. Combined mode can be used in development environments, but it should be avoided in critical deployment environments.
+
+* For redundancy, a Kafka cluster should use 3 controllers. More than 3 controllers is not recommended in critical environments. In the rare case of a partial network failure it is possible for the cluster metadata quorum to become unavailable. This limitation will be addressed in a future release of Kafka.
+
+* The Kafka controllers store all the metadata for the cluster in memory and on disk. We believe that for a typical Kafka cluster 5GB of main memory and 5GB of disk space on the metadata log director is sufficient.
+
 
 ## Kafka與Flume整合
 
@@ -708,6 +715,36 @@ bin/kafka-producer-perf-test.sh --topic test --record-size 1024 --num-records 10
 ```bash
 bin/kafka-consumer-perf-test.sh --bootstrap-server xx:9092,xx1:9092 --topic test --messages 1000000 --consumer.config config/consumer.properties
 ``` 
+
+## Security
+- Authentication of connections to brokers from clients (producers and consumers), other brokers and tools, using either SSL or SASL. Kafka supports the following SASL mechanisms:
+  * SASL/GSSAPI (Kerberos) - starting at version 0.9.0.0
+  * SASL/PLAIN - starting at version 0.10.0.0
+  * SASL/SCRAM-SHA-256 and SASL/SCRAM-SHA-512 - starting at version 0.10.2.0
+  * SASL/OAUTHBEARER - starting at version 2.0
+ - Authentication of connections from brokers to ZooKeeper
+ - Encryption of data transferred between brokers and clients, between brokers, or between brokers and tools using SSL (Note that there is a performance degradation when SSL is enabled, the magnitude of which depends on the CPU type and the JVM implementation.)
+ - Authorization of read / write operations by clients
+ - Authorization is pluggable and integration with external authorization services is supported
+ 
+### Listener Configuration
+The security protocol of each listener is defined in a separate configuration: listener.security.protocol.map. The value is a comma-separated list of each listener mapped to its security protocol. For example, the follow value configuration specifies that the CLIENT listener will use SSL while the BROKER listener will use plaintext.
+```
+listener.security.protocol.map=CLIENT:SSL,BROKER:PLAINTEXT
+```
+Possible options (case-insensitive) for the security protocol are given below:
+* PLAINTEXT : The plaintext protocol provides no security and does not require any additional configuration.
+* SSL
+* SASL_PLAINTEXT
+* SASL_SSL
+
+Among the listeners in this list, it is possible to declare the listener to be used for inter-broker communication by setting the inter.broker.listener.name configuration to the name of the listener. The primary purpose of the inter-broker listener is partition replication. If not defined, then the inter-broker listener is determined by the security protocol defined by security.inter.broker.protocol, which defaults to PLAINTEXT.
+
+For legacy clusters which rely on Zookeeper to store cluster metadata, it is possible to declare a separate listener to be used for metadata propagation from the active controller to the brokers. This is defined by control.plane.listener.name. The active controller will use this listener when it needs to push metadata updates to the brokers in the cluster. The benefit of using a control plane listener is that it uses a separate processing thread, which makes it less likely for application traffic to impede timely propagation of metadata changes (such as partition leader and ISR updates). Note that the default value is null, which means that the controller will use the same listener defined by inter.broker.listener
+
+In a KRaft cluster, a broker is any server which has the broker role enabled in process.roles and a controller is any server which has the controller role enabled. Listener configuration depends on the role. The listener defined by inter.broker.listener.name is used exclusively for requests between brokers. Controllers, on the other hand, must use separate listener which is defined by the controller.listener.names configuration. This cannot be set to the same value as the inter-broker listener.
+
+
 
 ## Reference
 [尚硅谷](https://www.bilibili.com/video/BV1vr4y1677k?p=46&spm_id_from=pageDriver)
